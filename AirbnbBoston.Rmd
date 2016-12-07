@@ -1,0 +1,293 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+#Load Libraries
+```{r,warning=FALSE,message=FALSE}
+#load libraries
+library(dplyr)
+library(readr)
+library(DT)
+library(RColorBrewer)
+library(ggplot2)
+library(cowplot)
+library(choroplethr)
+library(choroplethrZip)
+library(ggmap)
+library(knitr)
+library(tm)
+library(wordcloud)
+library(shiny)
+```
+
+#Read Files
+```{r,eval=FALSE}
+setwd("C:/Users/He Yu/Downloads")
+airbnb = read_csv(file="Datasets/calendar.csv")
+airbnb16 = filter(airbnb,date=="Jan-16" | date=="Feb-16" | date=="Mar-16" | date=="Apr-16" | date=="May-16" | date=="Jun-16" | date=="Jul-16" | date=="Aug-16" | date=="Sep-16" | date=="Oct-16" | date=="Nov-16" | date=="Dec-16")
+airbnb16$price=as.numeric(airbnb16$price)
+#View(airbnb16)
+```
+#Trend of the average price variation in 2016
+```{r,message=FALSE}
+#monthly average price
+mon_avg<-NULL
+mon_avg1 = airbnb16%>%group_by(date)%>%summarise(price=mean(price, na.rm=T))
+#plot the point graph with fitting line
+mon_avg1[1:12,1]=c("Apr","Aug","Dec","Feb","Jan","Jul","Jun","Mar","May","Nov","Oct","Sep")
+mon_avg=mon_avg1
+mon_avg[1,]=mon_avg1[5,]
+mon_avg[2,]=mon_avg1[4,]
+mon_avg[3,]=mon_avg1[8,]
+mon_avg[4,]=mon_avg1[1,]
+mon_avg[5,]=mon_avg1[9,]
+mon_avg[6,]=mon_avg1[7,]
+mon_avg[7,]=mon_avg1[6,]
+mon_avg[8,]=mon_avg1[2,]
+mon_avg[9,]=mon_avg1[12,]
+mon_avg[10,]=mon_avg1[11,]
+mon_avg[11,]=mon_avg1[10,]
+mon_avg[12,]=mon_avg1[3,]
+mon_avg$date <- factor(mon_avg$date, levels=unique(mon_avg$date))
+ggplot(data=mon_avg, mapping = aes(date, price,group=1)) + 
+  geom_smooth(se=F, color="blue")+geom_point()+ylim(180,260)+labs(title="Trend of the average price in 2016 for Airbnb in Boston")
+```
+#Comparison of the Average price distribution among Oct, Feb and Jun 
+```{r,warning=FALSE}
+#compute the monthly average price in Oct, Feb and Jun
+airbnb_Oct=filter(airbnb16,date=="Oct-16")
+Avg_Oct=airbnb_Oct%>%group_by(listing_id)%>%summarise(meanp=mean(price, na.rm=T))
+#do similar process for Feb
+airbnb_Feb=filter(airbnb16,date=="Feb-16")
+Avg_Feb=airbnb_Feb%>%group_by(listing_id)%>%summarise(meanp=mean(price, na.rm=T))
+#do similar process for Jun
+airbnb_Jun=filter(airbnb16,date=="Jun-16")
+Avg_Jun=airbnb_Jun%>%group_by(listing_id)%>%summarise(meanp=mean(price, na.rm=T))
+##plot the histogram respectively
+d <- ggplot(Avg_Oct, aes(meanp, fill =..count..))
+d + geom_histogram(bins = 20)+
+  labs(x = "Average price of October", title = "Average price distribution in October")+
+  ylim(0,400)
+d <- ggplot(Avg_Feb, aes(meanp, fill =..count..))
+d + geom_histogram(bins = 20)+
+  labs(x = "Average price of February", title = "Average price distribution in February")+
+  ylim(0,400)
+d <- ggplot(Avg_Jun, aes(meanp, fill =..count..))
+d + geom_histogram(bins = 20)+
+  labs(x = "Average price of June", title = "Average price distribution in June")+
+  ylim(0,400)
+#to have all three months shown on a single boxplot and histogram
+merged.avg=rbind(Avg_Feb, Avg_Jun, Avg_Oct)
+merged.avg$month=c(rep("Feb", nrow(Avg_Feb)),
+                   rep("Jun", nrow(Avg_Jun)),
+                   rep("Oct", nrow(Avg_Oct)))
+merged.avg$MeanPrice=cut(merged.avg$meanp, 8)
+
+ggplot(data = merged.avg[!is.na(merged.avg$meanp),], 
+       mapping=aes(x = month, y=meanp)) + 
+  geom_boxplot()
+
+ggplot(data = merged.avg[!is.na(merged.avg$meanp),]) + 
+  geom_bar(mapping = aes(x =month, fill = MeanPrice, y = (..count..)/sum(..count..)),    
+           position = "dodge")+
+  labs(title = "Average Price by Months", 
+       y = "Percent", 
+       x = "Month")
+
+```
+##Mapping out the price distribution in Suffolk City, Boston 
+```{r}
+#read the original list
+setwd("C:/Users/He Yu/Downloads")
+siteinfo = read_csv(file="Datasets/listings.csv")
+locationinfo1 = siteinfo[,c(1,49,50,61)]
+locationinfo1$price=as.numeric(locationinfo1$price)
+locationinfo = locationinfo1[1:3000,]
+#to get the zipcode for each site based on their longitude and latitude, since I save the results for grabing loctaion information to a csv file, you don't need to run this part of loop
+region<-NULL
+neigborhood<-NULL
+for(i in 2982:3000){
+  loc<-c(locationinfo[i,3],locationinfo[i,2])
+  longlan<-as.numeric(loc)
+  res <- revgeocode(longlan, output="more")
+  region = c(region,as.character(res$postal_code))
+  neigborhood = c(neigborhood,as.character(res$neighborhood))
+}
+locationinfo = data.frame(locationinfo,region)
+locationinfo = data.frame(locationinfo,neigborhood)
+write.csv(locationinfo,"D:/R/Final Project/locationinfo.csv")#save the location information we get from Google to a csv file
+#to get the mean price for each neigborhood
+setwd("D:/R/Final Project")
+locationinfo<-read_csv(file="locationinfo.csv")#load the location information from the csv file
+Avg_loc = locationinfo%>%group_by(region)%>%summarise(value=mean(price, na.rm=T))
+#map the distribution for Suffolk City whose fips code is 25025
+zip_choropleth(Avg_loc,
+               county_zoom=25025,
+               title="Airbnb price distribution in Boston",
+               legend="mean price")
+```
+
+#Relationship between the price and the condition of the sites 
+```{r,message=FALSE,warning=FALSE}
+setwd("C:/Users/He Yu/Downloads")
+airbnbdata = read_csv(file="Datasets/listings.csv")
+airbnbdata=as.data.frame(airbnbdata)
+airbnbdata1=airbnbdata[,c(1,52,54,55,56,57,61)]
+airbnbdata1=filter(airbnbdata1,accommodates>="1" & accommodates<"9")
+airbnbdata1$price=as.numeric(airbnbdata1$price)
+airbnbdata1$bedrooms=as.numeric(airbnbdata1$bedrooms)
+airbnbdata1$bathrooms=as.numeric(airbnbdata1$bathrooms)
+airbnbdata1$beds=as.numeric(airbnbdata1$beds)
+airbnbdata1$accommodates=as.numeric(airbnbdata1$accommodates)
+airbnbdata1=filter(airbnbdata1,beds>0 & beds<20)
+
+#Mean price VS bedrooms
+    grouped1 = airbnbdata1 %>% group_by(bedrooms) %>% summarise(mean_price = mean(as.numeric(price), na.rm = T))
+    grouped1=na.omit(grouped1)
+    Numberofbedrooms <- grouped1$bedrooms
+    MeanPrice <- grouped1$mean_price
+    ggplot(grouped1, aes(x =Numberofbedrooms, y = MeanPrice), colour = 'red') + geom_bar(stat = 'identity')
+    
+#Mean Price VS people 
+    grouped2 = airbnbdata1 %>% group_by(accommodates) %>% summarise(mean_price = mean(as.numeric(price), na.rm = T))
+    grouped2=na.omit(grouped2)
+    Numberofpeople <- grouped2$accommodates
+    MeanPrice <- grouped2$mean_price
+    ggplot(grouped2, aes(x =Numberofpeople, y = MeanPrice), colour = 'red') + geom_bar(stat = 'identity')
+    
+ #price rate per person
+    mp <- c(grouped2[,2]/grouped2[,1])
+    people <- c(1:13)
+    table <- data.frame(people,mp)
+    plot(table)
+    lines(table)
+```
+
+##Word cloud to see what do customers and the host care about the residence
+```{r}
+setwd("C:/Users/He Yu/Downloads")
+guestsanalysis = read_csv(file="Datasets/reviews.csv")
+# host's description 
+
+hosts<- Corpus(VectorSource(airbnbdata$host_about))
+  
+  hosts <- tm_map(hosts, stripWhitespace)
+  hosts <- tm_map(hosts, tolower)
+  hosts <- tm_map(hosts, removeWords, stopwords('english'))
+  hosts <- tm_map(hosts, stemDocument)
+  hosts<-tm_map(hosts,removeNumbers)
+  hosts<-tm_map(hosts,removePunctuation)
+  hosts<-tm_map(hosts,PlainTextDocument)
+  hosts<-tm_map(hosts,removeWords,c('boston','airbnb','will','can','also','just','one','much','every','city','like','enjoy','best','make','place','places','living','always','please','monday','want','take','look','things','great','now','meet','need','book','since','good','trip','beautiful','well','real','many','new','love','years','people','travel','traveling','housing'))
+  
+  wordcloud(hosts, scale=c(2,0.5), max.words=100, random.order=FALSE, 
+            rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(10, 'Paired'))
+  
+#guest's review
+  
+guests <- Corpus(VectorSource(guestsanalysis$comments))
+
+  guests <- tm_map(guests, stripWhitespace)
+  guests <- tm_map(guests, tolower)
+  guests <- tm_map(guests, removeWords, stopwords('english'))
+  guests <- tm_map(guests, stemDocument)
+  guests<-tm_map(guests,removeNumbers)
+  guests<-tm_map(guests,removePunctuation)
+  guests<-tm_map(guests,PlainTextDocument)
+  guests<-tm_map(guests,removeWords, c('great','boston','nice','really','nice','two','will','even','good','lovely','can','exactly','next','one','much',
+                                      'feel','little','need','needed','thank','trip','place','stay','stayed','also','visit','make','staying','wonderful','airbnb','just','perfect','made'))
+  
+  wordcloud(guests, scale=c(2,0.5), max.words=100, random.order=FALSE, 
+            rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(10, 'Paired'))
+
+
+```
+
+#A shiny app to see the condition of the sites provided by Airbnb in Boston
+```{r}
+shinyApp(
+#ui
+shinyUI(fluidPage(
+  sidebarPanel(
+    selectInput("n_breaks", label = "Classify:",
+                choices = c('Number of bedrooms', 'Number of beds', 'Number of bathrooms', 'Number of people accommodates'), 
+                selected = 'Number of bedrooms')
+  ),
+  mainPanel(
+    plotOutput('plot')
+  )
+)),
+
+#server
+
+shinyServer(function(input, output) {
+  output$plot<-renderPlot({
+    if(input$n_breaks=='Number of bedrooms') {
+      a<-table(airbnbdata1$bedrooms)
+      pct <- round(a/sum(a)*100, digits = 1)
+      lbls1 <- pct # add percents to labels 
+      lbls1 <- paste(pct,"%",sep="") # ad % to labels 
+      pie(a,labels = lbls1, main = 'Number of bedrooms', col=terrain.colors(length(a)))
+      legend ('topright', c('0 bedroom','1 bedroom','2 bedrooms','3 bedrooms','4 bedrooms','5 bedrooms'), cex=0.8, fill = terrain.colors(length(a)))
+      #pie(sample(1:10, 20, replace=T))
+    }else{pie
+      if(input$n_breaks== 'Number of beds'){
+        b<-table(airbnbdata1$beds)
+        b=as.data.frame(b)
+        ##b1<-matrix(b)
+        b[6,2]=sum(b[6:10,2])
+        b<-b[-c(7:10),]
+        pct <- round(b$Freq/sum(b$Freq)*100, digits = 1)
+        lbls2 <- pct # add percents to labels 
+        lbls2 <- paste(pct,"%",sep="") # ad % to labels 
+        pie(b$Freq, labels = lbls2, main = 'Number of beds', col=terrain.colors(6))
+        legend ('topright',
+                c('1 bed','2 beds','3 beds','4 beds','5 beds','>5 beds'), 
+                cex=0.8, fill = terrain.colors(6))
+      }else{
+        if(input$n_breaks== 'Number of bathrooms'){
+          c<-table(airbnbdata1$bathrooms)
+          c=as.data.frame(c)
+          c[7,2]=sum(c[7:12,2])
+          c<-c[-c(8:12),]
+          pct <- round(c$Freq/sum(c$Freq)*100, digits = 1)
+          lbls3 <- pct # add percents to labels 
+          lbls3 <- paste(pct,"%",sep="") # ad % to labels 
+          pie(c$Freq,labels = lbls3, main = "Number of bathrooms", col=terrain.colors(7))
+          legend('topright',
+                 c('0 bathroom','0.5 bathroom','1 bathroom','1.5 bathrooms','2 bathrooms','2.5 bathrooms','>2.5 bathrooms'),
+                 cex=0.8, 
+                 fill = terrain.colors(7))
+          
+        }else{
+          if(input$n_breaks== 'Number of people accommodates'){
+            d<-table(airbnbdata1$accommodates)
+            d=as.data.frame(d)
+            d[7,2]=sum(d[7:13,2])
+            d<-d[-c(8:13),]
+            pct <- round(d$Freq/sum(d$Freq)*100, digits = 1)
+            lbls4 <- pct # add percents to labels 
+            lbls4 <- paste(pct,"%",sep="") # ad % to labels 
+            pie(d$Freq, labels = lbls4, main = 'Number of people accommodates', col=terrain.colors(7)) 
+            legend('topright',
+                   c('1 people','2 people','3 people','4 people','5 people','6 people','>6 people'),
+                   cex=0.8,
+                   fill = terrain.colors(7))
+        }else{
+          pie(sample(1:10, 20, replace=T))
+    }
+  }}}
+  })
+})
+  )
+```
+
+
+
+
+
+
+
+
+
